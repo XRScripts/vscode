@@ -437,12 +437,14 @@ export interface IViewModel extends ITreeElement {
 	getSelectedFunctionBreakpoint(): IFunctionBreakpoint | undefined;
 	setSelectedExpression(expression: IExpression | undefined): void;
 	setSelectedFunctionBreakpoint(functionBreakpoint: IFunctionBreakpoint | undefined): void;
+	updateViews(): void;
 
 	isMultiSessionView(): boolean;
 
 	onDidFocusSession: Event<IDebugSession | undefined>;
 	onDidFocusStackFrame: Event<{ stackFrame: IStackFrame | undefined, explicit: boolean }>;
 	onDidSelectExpression: Event<IExpression | undefined>;
+	onWillUpdateViews: Event<void>;
 }
 
 export interface IEvaluate {
@@ -669,9 +671,11 @@ export interface IConfigurationManager {
 		launch: ILaunch | undefined;
 		config: IConfig | undefined;
 		name: string | undefined;
+		// Type is used when matching dynamic configurations to their corresponding provider
+		type: string | undefined;
 	};
 
-	selectConfiguration(launch: ILaunch | undefined, name?: string, config?: IConfig): Promise<void>;
+	selectConfiguration(launch: ILaunch | undefined, name?: string, config?: IConfig, type?: string): Promise<void>;
 
 	getLaunches(): ReadonlyArray<ILaunch>;
 
@@ -692,7 +696,7 @@ export interface IConfigurationManager {
 
 	isDebuggerInterestedInLanguage(language: string): boolean;
 	hasDebugConfigurationProvider(debugType: string): boolean;
-	getDynamicProviders(): Promise<{ label: string, provider: IDebugConfigurationProvider, pick: () => Promise<{ launch: ILaunch, config: IConfig } | undefined> }[]>;
+	getDynamicProviders(): Promise<{ label: string, provider: IDebugConfigurationProvider | undefined, pick: () => Promise<{ launch: ILaunch, config: IConfig } | undefined> }[]>;
 
 	registerDebugConfigurationProvider(debugConfigurationProvider: IDebugConfigurationProvider): IDisposable;
 	unregisterDebugConfigurationProvider(debugConfigurationProvider: IDebugConfigurationProvider): void;
@@ -802,7 +806,7 @@ export interface IDebugService {
 	/**
 	 * Adds new breakpoints to the model for the file specified with the uri. Notifies debug adapter of breakpoint changes.
 	 */
-	addBreakpoints(uri: uri, rawBreakpoints: IBreakpointData[], context: string): Promise<IBreakpoint[]>;
+	addBreakpoints(uri: uri, rawBreakpoints: IBreakpointData[], ariaAnnounce?: boolean): Promise<IBreakpoint[]>;
 
 	/**
 	 * Updates the breakpoints.

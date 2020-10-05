@@ -13,21 +13,12 @@ import { Emitter, Event } from 'vs/base/common/event';
 import { Disposable, IDisposable, toDisposable } from 'vs/base/common/lifecycle';
 import * as platform from 'vs/base/common/platform';
 import { URI } from 'vs/base/common/uri';
-import { Schemas, RemoteAuthorities } from 'vs/base/common/network';
+import { FileAccess, RemoteAuthorities } from 'vs/base/common/network';
 import { BrowserFeatures } from 'vs/base/browser/canIUse';
 
 export function clearNode(node: HTMLElement): void {
 	while (node.firstChild) {
 		node.removeChild(node.firstChild);
-	}
-}
-
-/**
- * @deprecated use `node.remove()` instead
- */
-export function removeNode(node: HTMLElement): void {
-	if (node.parentNode) {
-		node.parentNode.removeChild(node);
 	}
 }
 
@@ -704,13 +695,13 @@ export function isAncestor(testChild: Node | null, testAncestor: Node | null): b
 
 export function findParentWithClass(node: HTMLElement, clazz: string, stopAtClazzOrNode?: string | HTMLElement): HTMLElement | null {
 	while (node && node.nodeType === node.ELEMENT_NODE) {
-		if (hasClass(node, clazz)) {
+		if (node.classList.contains(clazz)) {
 			return node;
 		}
 
 		if (stopAtClazzOrNode) {
 			if (typeof stopAtClazzOrNode === 'string') {
-				if (hasClass(node, stopAtClazzOrNode)) {
+				if (node.classList.contains(stopAtClazzOrNode)) {
 					return null;
 				}
 			} else {
@@ -1228,16 +1219,6 @@ export function animate(fn: () => void): IDisposable {
 
 RemoteAuthorities.setPreferredWebSchema(/^https:/.test(window.location.href) ? 'https' : 'http');
 
-export function asDomUri(uri: URI): URI {
-	if (!uri) {
-		return uri;
-	}
-	if (Schemas.vscodeRemote === uri.scheme) {
-		return RemoteAuthorities.rewrite(uri);
-	}
-	return uri;
-}
-
 /**
  * returns url('...')
  */
@@ -1245,9 +1226,8 @@ export function asCSSUrl(uri: URI): string {
 	if (!uri) {
 		return `url('')`;
 	}
-	return `url('${asDomUri(uri).toString(true).replace(/'/g, '%27')}')`;
+	return `url('${FileAccess.asBrowserUri(uri).toString(true).replace(/'/g, '%27')}')`;
 }
-
 
 export function triggerDownload(dataOrUri: Uint8Array | URI, name: string): void {
 

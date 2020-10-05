@@ -75,6 +75,8 @@ import 'vs/workbench/services/label/common/labelService';
 import 'vs/workbench/services/extensionManagement/common/webExtensionsScannerService';
 import 'vs/workbench/services/extensionManagement/common/extensionEnablementService';
 import 'vs/workbench/services/extensionManagement/browser/builtinExtensionsScannerService';
+import 'vs/workbench/services/extensionRecommendations/common/extensionIgnoredRecommendationsService';
+import 'vs/workbench/services/extensionRecommendations/common/workspaceExtensionsConfig';
 import 'vs/workbench/services/notification/common/notificationService';
 import 'vs/workbench/services/userDataSync/common/userDataSyncUtil';
 import 'vs/workbench/services/remote/common/remoteExplorerService';
@@ -86,6 +88,7 @@ import 'vs/workbench/services/quickinput/browser/quickInputService';
 import 'vs/workbench/services/userDataSync/browser/userDataSyncWorkbenchService';
 import 'vs/workbench/services/authentication/browser/authenticationService';
 import 'vs/workbench/services/hover/browser/hoverService';
+import 'vs/workbench/services/experiment/common/experimentService';
 
 import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
 import { ExtensionGalleryService } from 'vs/platform/extensionManagement/common/extensionGalleryService';

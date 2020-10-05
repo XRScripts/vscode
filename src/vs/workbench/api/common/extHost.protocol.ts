@@ -144,6 +144,7 @@ export type CommentThreadChanges = Partial<{
 	contextValue: string,
 	comments: modes.Comment[],
 	collapseState: modes.CommentThreadCollapsibleState;
+	readOnly: boolean;
 }>;
 
 export interface MainThreadCommentsShape extends IDisposable {
@@ -738,8 +739,9 @@ export interface MainThreadNotebookShape extends IDisposable {
 	$registerNotebookProvider(extension: NotebookExtensionDescription, viewType: string, supportBackup: boolean, options: {
 		transientOutputs: boolean;
 		transientMetadata: TransientMetadata;
-		viewOptions?: { displayName: string; filenamePattern: string | IRelativePattern | INotebookExclusiveDocumentFilter; exclusive: boolean; };
+		viewOptions?: { displayName: string; filenamePattern: (string | IRelativePattern | INotebookExclusiveDocumentFilter)[]; exclusive: boolean; };
 	}): Promise<void>;
+	$updateNotebookProviderOptions(viewType: string, options?: { transientOutputs: boolean; transientMetadata: TransientMetadata; }): Promise<void>;
 	$unregisterNotebookProvider(viewType: string): Promise<void>;
 	$registerNotebookKernelProvider(extension: NotebookExtensionDescription, handle: number, documentFilter: INotebookDocumentFilter): Promise<void>;
 	$unregisterNotebookKernelProvider(handle: number): Promise<void>;
@@ -829,7 +831,7 @@ export interface MainThreadTaskShape extends IDisposable {
 
 export interface MainThreadExtensionServiceShape extends IDisposable {
 	$activateExtension(extensionId: ExtensionIdentifier, reason: ExtensionActivationReason): Promise<void>;
-	$onWillActivateExtension(extensionId: ExtensionIdentifier): void;
+	$onWillActivateExtension(extensionId: ExtensionIdentifier): Promise<void>;
 	$onDidActivateExtension(extensionId: ExtensionIdentifier, codeLoadingTime: number, activateCallTime: number, activateResolvedTime: number, activationReason: ExtensionActivationReason): void;
 	$onExtensionActivationError(extensionId: ExtensionIdentifier, error: ExtensionActivationError): Promise<void>;
 	$onExtensionRuntimeError(extensionId: ExtensionIdentifier, error: SerializedError): void;
@@ -1604,7 +1606,7 @@ export interface DecorationRequest {
 	readonly uri: UriComponents;
 }
 
-export type DecorationData = [number, boolean, string, string, ThemeColor];
+export type DecorationData = [boolean, string, string, ThemeColor];
 export type DecorationReply = { [id: number]: DecorationData; };
 
 export interface ExtHostDecorationsShape {

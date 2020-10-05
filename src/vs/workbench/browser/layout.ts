@@ -14,7 +14,7 @@ import { pathsToEditors, SideBySideEditorInput } from 'vs/workbench/common/edito
 import { SidebarPart } from 'vs/workbench/browser/parts/sidebar/sidebarPart';
 import { PanelPart } from 'vs/workbench/browser/parts/panel/panelPart';
 import { PanelRegistry, Extensions as PanelExtensions } from 'vs/workbench/browser/panel';
-import { Position, Parts, IWorkbenchLayoutService, positionFromString, positionToString } from 'vs/workbench/services/layout/browser/layoutService';
+import { Position, Parts, PanelOpensMaximizedOptions, IWorkbenchLayoutService, positionFromString, positionToString, panelOpensMaximizedFromString } from 'vs/workbench/services/layout/browser/layoutService';
 import { IWorkspaceContextService, WorkbenchState } from 'vs/platform/workspace/common/workspace';
 import { IStorageService, StorageScope, WillSaveStateReason } from 'vs/platform/storage/common/storage';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
@@ -54,6 +54,7 @@ export enum Settings {
 
 	SIDEBAR_POSITION = 'workbench.sideBar.location',
 	PANEL_POSITION = 'workbench.panel.defaultLocation',
+	PANEL_OPENS_MAXIMIZED = 'workbench.panel.opensMaximized',
 
 	ZEN_MODE_RESTORE = 'zenMode.restore',
 }
@@ -68,6 +69,7 @@ enum Storage {
 	PANEL_DIMENSION = 'workbench.panel.dimension',
 	PANEL_LAST_NON_MAXIMIZED_WIDTH = 'workbench.panel.lastNonMaximizedWidth',
 	PANEL_LAST_NON_MAXIMIZED_HEIGHT = 'workbench.panel.lastNonMaximizedHeight',
+	PANEL_LAST_IS_MAXIMIZED = 'workbench.panel.lastIsMaximized',
 
 	EDITOR_HIDDEN = 'workbench.editor.hidden',
 
@@ -218,6 +220,7 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 			position: Position.BOTTOM,
 			lastNonMaximizedWidth: 300,
 			lastNonMaximizedHeight: 300,
+			wasLastMaximized: false,
 			panelToRestore: undefined as string | undefined
 		},
 
@@ -531,6 +534,9 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 
 		// Panel visibility
 		this.state.panel.hidden = this.storageService.getBoolean(Storage.PANEL_HIDDEN, StorageScope.WORKSPACE, true);
+
+		// Whether or not the panel was last maximized
+		this.state.panel.wasLastMaximized = this.storageService.getBoolean(Storage.PANEL_LAST_IS_MAXIMIZED, StorageScope.WORKSPACE, false);
 
 		// Panel position
 		this.updatePanelPosition();
@@ -1301,7 +1307,6 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 
 		[titleBar, editorPart, activityBar, panelPart, sideBar, statusBar].forEach((part: Part) => {
 			this._register(part.onDidVisibilityChange((visible) => {
-				this._onPartVisibilityChange.fire();
 				if (part === sideBar) {
 					this.setSideBarHidden(!visible, true);
 				} else if (part === panelPart) {
@@ -1309,6 +1314,7 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 				} else if (part === editorPart) {
 					this.setEditorHidden(!visible, true);
 				}
+				this._onPartVisibilityChange.fire();
 			}));
 		});
 
@@ -1537,12 +1543,16 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 	}
 
 	setPanelHidden(hidden: boolean, skipLayout?: boolean): void {
+		const wasHidden = this.state.panel.hidden;
 		this.state.panel.hidden = hidden;
 
 		// Return if not initialized fully #105480
 		if (!this.workbenchGrid) {
 			return;
 		}
+
+		const isPanelMaximized = this.isPanelMaximized();
+		const panelOpensMaximized = this.panelOpensMaximized();
 
 		// Adjust CSS
 		if (hidden) {
@@ -1567,24 +1577,42 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 			}
 		}
 
-		// If not maximized and hiding, unmaximize before hiding to allow caching of size
-		if (this.isPanelMaximized() && hidden) {
+		// If maximized and in process of hiding, unmaximize before hiding to allow caching of non-maximized size
+		if (hidden && isPanelMaximized) {
 			this.toggleMaximizedPanel();
 		}
 
-		// Propagate to grid
-		this.workbenchGrid.setViewVisible(this.panelPartView, !hidden);
+		// Don't proceed if we have already done this before
+		if (wasHidden === hidden) {
+			return;
+		}
 
+		// Propagate layout changes to grid
+		this.workbenchGrid.setViewVisible(this.panelPartView, !hidden);
+		// If in process of showing, toggle whether or not panel is maximized
+		if (!hidden) {
+			if (isPanelMaximized !== panelOpensMaximized) {
+				this.toggleMaximizedPanel();
+			}
+		}
+		else {
+			// If in process of hiding, remember whether the panel is maximized or not
+			this.state.panel.wasLastMaximized = isPanelMaximized;
+		}
 		// Remember in settings
 		if (!hidden) {
 			this.storageService.store(Storage.PANEL_HIDDEN, 'false', StorageScope.WORKSPACE);
-		} else {
-			this.storageService.remove(Storage.PANEL_HIDDEN, StorageScope.WORKSPACE);
 		}
+		else {
+			this.storageService.remove(Storage.PANEL_HIDDEN, StorageScope.WORKSPACE);
 
-		// The editor and panel cannot be hidden at the same time
-		if (hidden && this.state.editor.hidden) {
-			this.setEditorHidden(false, true);
+			// Remember this setting only when panel is hiding
+			if (this.state.panel.wasLastMaximized) {
+				this.storageService.store(Storage.PANEL_LAST_IS_MAXIMIZED, true, StorageScope.WORKSPACE);
+			}
+			else {
+				this.storageService.remove(Storage.PANEL_LAST_IS_MAXIMIZED, StorageScope.WORKSPACE);
+			}
 		}
 
 		if (focusEditor) {
@@ -1610,6 +1638,16 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 			this.setEditorHidden(false);
 			this.workbenchGrid.resizeView(this.panelPartView, { width: this.state.panel.position === Position.BOTTOM ? size.width : this.state.panel.lastNonMaximizedWidth, height: this.state.panel.position === Position.BOTTOM ? this.state.panel.lastNonMaximizedHeight : size.height });
 		}
+	}
+
+	/**
+	 * Returns whether or not the panel opens maximized
+	 */
+	private panelOpensMaximized() {
+		const panelOpensMaximized = panelOpensMaximizedFromString(this.configurationService.getValue<string>(Settings.PANEL_OPENS_MAXIMIZED));
+		const panelLastIsMaximized = this.state.panel.wasLastMaximized;
+
+		return panelOpensMaximized === PanelOpensMaximizedOptions.ALWAYS || (panelOpensMaximized === PanelOpensMaximizedOptions.REMEMBER_LAST && panelLastIsMaximized);
 	}
 
 	hasWindowBorder(): boolean {

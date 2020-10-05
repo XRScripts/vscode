@@ -13,8 +13,7 @@ import { ITextFileEditorModel, ITextFileEditorModelManager, ITextFileEditorModel
 import { ILifecycleService } from 'vs/platform/lifecycle/common/lifecycle';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { ResourceMap } from 'vs/base/common/map';
-import { IFileService, FileChangesEvent, FileOperation } from 'vs/platform/files/common/files';
-import { distinct, coalesce } from 'vs/base/common/arrays';
+import { IFileService, FileChangesEvent, FileOperation, FileChangeType } from 'vs/platform/files/common/files';
 import { ResourceQueue } from 'vs/base/common/async';
 import { onUnexpectedError } from 'vs/base/common/errors';
 import { TextFileSaveParticipant } from 'vs/workbench/services/textfile/common/textFileSaveParticipant';
@@ -23,7 +22,7 @@ import { CancellationToken } from 'vs/base/common/cancellation';
 import { INotificationService } from 'vs/platform/notification/common/notification';
 import { IWorkingCopyFileService, WorkingCopyFileEvent } from 'vs/workbench/services/workingCopy/common/workingCopyFileService';
 import { ITextSnapshot, ITextBufferFactory } from 'vs/editor/common/model';
-import { joinPath, extUri } from 'vs/base/common/resources';
+import { joinPath, isEqualOrParent } from 'vs/base/common/resources';
 import { createTextBufferFactoryFromSnapshot } from 'vs/editor/common/model/textModel';
 import { PLAINTEXT_MODE_ID } from 'vs/editor/common/modes/modesRegistry';
 import { IUriIdentityService } from 'vs/workbench/services/uriIdentity/common/uriIdentity';
@@ -100,17 +99,18 @@ export class TextFileEditorModelManager extends Disposable implements ITextFileE
 	}
 
 	private onDidFilesChange(e: FileChangesEvent): void {
+		for (const model of this.models) {
+			if (model.isDirty() || !model.isResolved()) {
+				continue; // require a resolved, saved model to continue
+			}
 
-		// Collect distinct (saved) models to update.
-		//
-		// Note: we also consider the added event because it could be that a file was added
-		// and updated right after.
-		distinct(
-			coalesce(
-				[...e.getUpdated(), ...e.getAdded()].map(({ resource }) => this.get(resource))
-			).filter(model => model && model.isResolved() && !model.isDirty()),
-			model => model.resource.toString()
-		).forEach(model => this.queueModelLoad(model));
+			// Trigger a model load for any update or add event that impacts
+			// the model. We also consider the added event because it could
+			// be that a file was added and updated right after.
+			if (e.contains(model.resource, FileChangeType.UPDATED, FileChangeType.ADDED)) {
+				this.queueModelLoad(model);
+			}
+		}
 	}
 
 	private queueModelLoad(model: TextFileEditorModel): void {
@@ -150,7 +150,7 @@ export class TextFileEditorModelManager extends Disposable implements ITextFileE
 					for (const model of this.models) {
 						const resource = model.resource;
 
-						if (extUri.isEqualOrParent(resource, target)) {
+						if (isEqualOrParent(resource, target)) {
 							// EXPLICITLY do not ignorecase, see https://github.com/microsoft/vscode/issues/56384
 							targetModels.push(model);
 						}
@@ -185,7 +185,6 @@ export class TextFileEditorModelManager extends Disposable implements ITextFileE
 							snapshot: sourceModel.isDirty() ? sourceModel.createSnapshot() : undefined
 						});
 					}
-
 				}
 			}
 

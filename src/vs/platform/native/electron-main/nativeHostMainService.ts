@@ -8,9 +8,9 @@ import { IWindowsMainService, ICodeWindow } from 'vs/platform/windows/electron-m
 import { MessageBoxOptions, MessageBoxReturnValue, shell, OpenDevToolsOptions, SaveDialogOptions, SaveDialogReturnValue, OpenDialogOptions, OpenDialogReturnValue, Menu, BrowserWindow, app, clipboard, powerMonitor, nativeTheme } from 'electron';
 import { OpenContext } from 'vs/platform/windows/node/window';
 import { ILifecycleMainService } from 'vs/platform/lifecycle/electron-main/lifecycleMainService';
-import { IOpenedWindow, IOpenWindowOptions, IWindowOpenable, IOpenEmptyWindowOptions } from 'vs/platform/windows/common/windows';
+import { IOpenedWindow, IOpenWindowOptions, IWindowOpenable, IOpenEmptyWindowOptions, IColorScheme } from 'vs/platform/windows/common/windows';
 import { INativeOpenDialogOptions } from 'vs/platform/dialogs/common/dialogs';
-import { isMacintosh, isWindows, isRootUser } from 'vs/base/common/platform';
+import { isMacintosh, isWindows, isRootUser, isLinux } from 'vs/base/common/platform';
 import { ICommonNativeHostService, IOSProperties, IOSStatistics } from 'vs/platform/native/common/native';
 import { ISerializableCommandAction } from 'vs/platform/actions/common/actions';
 import { INativeEnvironmentService } from 'vs/platform/environment/common/environment';
@@ -22,8 +22,11 @@ import { ITelemetryData, ITelemetryService } from 'vs/platform/telemetry/common/
 import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
 import { MouseInputEvent } from 'vs/base/parts/sandbox/common/electronTypes';
 import { arch, totalmem, release, platform, type, loadavg, freemem, cpus } from 'os';
-import { ColorScheme } from 'vs/platform/theme/common/theme';
 import { virtualMachineHint } from 'vs/base/node/id';
+import { ILogService } from 'vs/platform/log/common/log';
+import { dirname, join } from 'vs/base/common/path';
+import product from 'vs/platform/product/common/product';
+import { memoize } from 'vs/base/common/decorators';
 
 export interface INativeHostMainService extends AddFirstParameterToFunctions<ICommonNativeHostService, Promise<unknown> /* only methods, not events */, number | undefined /* window ID */> { }
 
@@ -38,7 +41,8 @@ export class NativeHostMainService implements INativeHostMainService {
 		@IDialogMainService private readonly dialogMainService: IDialogMainService,
 		@ILifecycleMainService private readonly lifecycleMainService: ILifecycleMainService,
 		@INativeEnvironmentService private readonly environmentService: INativeEnvironmentService,
-		@ITelemetryService private readonly telemetryService: ITelemetryService
+		@ITelemetryService private readonly telemetryService: ITelemetryService,
+		@ILogService private readonly logService: ILogService
 	) {
 		this.registerListeners();
 	}
@@ -47,16 +51,10 @@ export class NativeHostMainService implements INativeHostMainService {
 
 		// Color Scheme changes
 		nativeTheme.on('updated', () => {
-			let colorScheme: ColorScheme;
-			if (nativeTheme.shouldUseInvertedColorScheme || nativeTheme.shouldUseHighContrastColors) {
-				colorScheme = ColorScheme.HIGH_CONTRAST;
-			} else if (nativeTheme.shouldUseDarkColors) {
-				colorScheme = ColorScheme.DARK;
-			} else {
-				colorScheme = ColorScheme.LIGHT;
-			}
-
-			this._onColorSchemeChange.fire(colorScheme);
+			this._onColorSchemeChange.fire({
+				highContrast: nativeTheme.shouldUseInvertedColorScheme || nativeTheme.shouldUseHighContrastColors,
+				dark: nativeTheme.shouldUseDarkColors
+			});
 		});
 	}
 
@@ -69,7 +67,7 @@ export class NativeHostMainService implements INativeHostMainService {
 
 	//#region Events
 
-	readonly onWindowOpen = Event.filter(Event.fromNodeEventEmitter(app, 'browser-window-created', (event, window: BrowserWindow) => window.id), windowId => !!this.windowsMainService.getWindowById(windowId));
+	readonly onWindowOpen = Event.map(this.windowsMainService.onWindowOpened, window => window.id);
 
 	readonly onWindowMaximize = Event.filter(Event.fromNodeEventEmitter(app, 'browser-window-maximize', (event, window: BrowserWindow) => window.id), windowId => !!this.windowsMainService.getWindowById(windowId));
 	readonly onWindowUnmaximize = Event.filter(Event.fromNodeEventEmitter(app, 'browser-window-unmaximize', (event, window: BrowserWindow) => window.id), windowId => !!this.windowsMainService.getWindowById(windowId));
@@ -82,7 +80,7 @@ export class NativeHostMainService implements INativeHostMainService {
 
 	readonly onOSResume = Event.fromNodeEventEmitter(powerMonitor, 'resume');
 
-	private readonly _onColorSchemeChange = new Emitter<ColorScheme>();
+	private readonly _onColorSchemeChange = new Emitter<IColorScheme>();
 	readonly onColorSchemeChange = this._onColorSchemeChange.event;
 
 	//#endregion
@@ -206,6 +204,23 @@ export class NativeHostMainService implements INativeHostMainService {
 		}
 	}
 
+	async setMinimumSize(windowId: number | undefined, width: number | undefined, height: number | undefined): Promise<void> {
+		const window = this.windowById(windowId);
+		if (window) {
+			const [windowWidth, windowHeight] = window.win.getSize();
+			const [minWindowWidth, minWindowHeight] = window.win.getMinimumSize();
+			const [newMinWindowWidth, newMinWindowHeight] = [width ?? minWindowWidth, height ?? minWindowHeight];
+			const [newWindowWidth, newWindowHeight] = [Math.max(windowWidth, newMinWindowWidth), Math.max(windowHeight, newMinWindowHeight)];
+
+			if (minWindowWidth !== newMinWindowWidth || minWindowHeight !== newMinWindowHeight) {
+				window.win.setMinimumSize(newMinWindowWidth, newMinWindowHeight);
+			}
+			if (windowWidth !== newWindowWidth || windowHeight !== newWindowHeight) {
+				window.win.setSize(newWindowWidth, newWindowHeight);
+			}
+		}
+	}
+
 	//#endregion
 
 	//#region Dialog
@@ -313,13 +328,6 @@ export class NativeHostMainService implements INativeHostMainService {
 		return true;
 	}
 
-	async updateTouchBar(windowId: number | undefined, items: ISerializableCommandAction[][]): Promise<void> {
-		const window = this.windowById(windowId);
-		if (window) {
-			window.updateTouchBar(items);
-		}
-	}
-
 	async moveItemToTrash(windowId: number | undefined, fullPath: string): Promise<boolean> {
 		return shell.moveItemToTrash(fullPath);
 	}
@@ -333,6 +341,69 @@ export class NativeHostMainService implements INativeHostMainService {
 		}
 
 		return isAdmin;
+	}
+
+	async writeElevated(windowId: number | undefined, source: URI, target: URI, options?: { overwriteReadonly?: boolean }): Promise<void> {
+		const sudoPrompt = await import('sudo-prompt');
+
+		return new Promise<void>((resolve, reject) => {
+			const sudoCommand: string[] = [`"${this.cliPath}"`];
+			if (options?.overwriteReadonly) {
+				sudoCommand.push('--file-chmod');
+			}
+
+			sudoCommand.push('--file-write', `"${source.fsPath}"`, `"${target.fsPath}"`);
+
+			const promptOptions = {
+				name: product.nameLong.replace('-', ''),
+				icns: (isMacintosh && this.environmentService.isBuilt) ? join(dirname(this.environmentService.appRoot), `${product.nameShort}.icns`) : undefined
+			};
+
+			sudoPrompt.exec(sudoCommand.join(' '), promptOptions, (error: string, stdout: string, stderr: string) => {
+				if (stdout) {
+					this.logService.trace(`[sudo-prompt] received stdout: ${stdout}`);
+				}
+
+				if (stderr) {
+					this.logService.trace(`[sudo-prompt] received stderr: ${stderr}`);
+				}
+
+				if (error) {
+					reject(error);
+				} else {
+					resolve(undefined);
+				}
+			});
+		});
+	}
+
+	@memoize
+	private get cliPath(): string {
+
+		// Windows
+		if (isWindows) {
+			if (this.environmentService.isBuilt) {
+				return join(dirname(process.execPath), 'bin', `${product.applicationName}.cmd`);
+			}
+
+			return join(this.environmentService.appRoot, 'scripts', 'code-cli.bat');
+		}
+
+		// Linux
+		if (isLinux) {
+			if (this.environmentService.isBuilt) {
+				return join(dirname(process.execPath), 'bin', `${product.applicationName}`);
+			}
+
+			return join(this.environmentService.appRoot, 'scripts', 'code-cli.sh');
+		}
+
+		// macOS
+		if (this.environmentService.isBuilt) {
+			return join(this.environmentService.appRoot, 'bin', 'code');
+		}
+
+		return join(this.environmentService.appRoot, 'scripts', 'code-cli.sh');
 	}
 
 	async getOSStatistics(): Promise<IOSStatistics> {
@@ -369,7 +440,7 @@ export class NativeHostMainService implements INativeHostMainService {
 	//#endregion
 
 
-	//#region clipboard
+	//#region Clipboard
 
 	async readClipboardText(windowId: number | undefined, type?: 'selection' | 'clipboard'): Promise<string> {
 		return clipboard.readText(type);
@@ -425,6 +496,13 @@ export class NativeHostMainService implements INativeHostMainService {
 
 	async toggleWindowTabsBar(): Promise<void> {
 		Menu.sendActionToFirstResponder('toggleTabBar:');
+	}
+
+	async updateTouchBar(windowId: number | undefined, items: ISerializableCommandAction[][]): Promise<void> {
+		const window = this.windowById(windowId);
+		if (window) {
+			window.updateTouchBar(items);
+		}
 	}
 
 	//#endregion
@@ -523,6 +601,57 @@ export class NativeHostMainService implements INativeHostMainService {
 		if (window && (event.type === 'mouseDown' || event.type === 'mouseUp')) {
 			window.win.webContents.sendInputEvent(event);
 		}
+	}
+
+	//#endregion
+
+	//#region Registry (windows)
+
+	async windowsGetStringRegKey(windowId: number | undefined, hive: 'HKEY_CURRENT_USER' | 'HKEY_LOCAL_MACHINE' | 'HKEY_CLASSES_ROOT' | 'HKEY_USERS' | 'HKEY_CURRENT_CONFIG', path: string, name: string): Promise<string | undefined> {
+		if (!isWindows) {
+			return undefined;
+		}
+
+		const Registry = await import('vscode-windows-registry');
+		try {
+			return Registry.GetStringRegKey(hive, path, name);
+		} catch {
+			return undefined;
+		}
+	}
+
+	//#endregion
+
+	//#region Credentials
+
+	async getPassword(windowId: number | undefined, service: string, account: string): Promise<string | null> {
+		const keytar = await import('keytar');
+
+		return keytar.getPassword(service, account);
+	}
+
+	async setPassword(windowId: number | undefined, service: string, account: string, password: string): Promise<void> {
+		const keytar = await import('keytar');
+
+		return keytar.setPassword(service, account, password);
+	}
+
+	async deletePassword(windowId: number | undefined, service: string, account: string): Promise<boolean> {
+		const keytar = await import('keytar');
+
+		return keytar.deletePassword(service, account);
+	}
+
+	async findPassword(windowId: number | undefined, service: string): Promise<string | null> {
+		const keytar = await import('keytar');
+
+		return keytar.findPassword(service);
+	}
+
+	async findCredentials(windowId: number | undefined, service: string): Promise<Array<{ account: string, password: string }>> {
+		const keytar = await import('keytar');
+
+		return keytar.findCredentials(service);
 	}
 
 	//#endregion

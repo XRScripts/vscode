@@ -544,7 +544,8 @@ export class ActivitybarPart extends Part implements IActivityBarService {
 			ariaLabel: nls.localize('home', "Home"),
 			actionViewItemProvider: action => new HomeActionViewItem(action),
 			allowContextMenu: true,
-			preventLoopNavigation: true
+			preventLoopNavigation: true,
+			ignoreOrientationForPreviousAndNextKey: true
 		}));
 
 		const homeBarIconBadge = document.createElement('div');
@@ -597,7 +598,8 @@ export class ActivitybarPart extends Part implements IActivityBarService {
 			orientation: ActionsOrientation.VERTICAL,
 			ariaLabel: nls.localize('manage', "Manage"),
 			animated: false,
-			preventLoopNavigation: true
+			preventLoopNavigation: true,
+			ignoreOrientationForPreviousAndNextKey: true
 		}));
 
 		this.globalActivityAction = new ActivityAction({
@@ -762,7 +764,11 @@ export class ActivitybarPart extends Part implements IActivityBarService {
 		const viewContainers = this.getViewContainers();
 		for (const { id } of this.cachedViewContainers) {
 			if (viewContainers.every(viewContainer => viewContainer.id !== id)) {
-				this.hideComposite(id);
+				if (this.viewDescriptorService.isViewContainerRemovedPermanently(id)) {
+					this.removeComposite(id);
+				} else {
+					this.hideComposite(id);
+				}
 			}
 		}
 	}

@@ -54,6 +54,10 @@ export interface IEditorOptions {
 	 */
 	ariaLabel?: string;
 	/**
+	 * The `tabindex` property of the editor's textarea
+	 */
+	tabIndex?: number;
+	/**
 	 * Render vertical lines at the specified columns.
 	 * Defaults to empty array.
 	 */
@@ -96,7 +100,7 @@ export interface IEditorOptions {
 	 * Remove unusual line terminators like LINE SEPARATOR (LS), PARAGRAPH SEPARATOR (PS).
 	 * Defaults to 'prompt'.
 	 */
-	unusualLineTerminators?: 'off' | 'prompt' | 'auto';
+	unusualLineTerminators?: 'auto' | 'off' | 'prompt';
 	/**
 	 * Should the corresponding line be selected when clicking on the line number?
 	 * Defaults to true.
@@ -3656,6 +3660,7 @@ export const enum EditorOption {
 	suggestOnTriggerCharacters,
 	suggestSelection,
 	tabCompletion,
+	tabIndex,
 	unusualLineTerminators,
 	useTabStops,
 	wordSeparators,
@@ -4215,10 +4220,14 @@ export const EditorOptions = {
 			description: nls.localize('tabCompletion', "Enables tab completions.")
 		}
 	)),
+	tabIndex: register(new EditorIntOption(
+		EditorOption.tabIndex, 'tabIndex',
+		0, -1, Constants.MAX_SAFE_SMALL_INTEGER
+	)),
 	unusualLineTerminators: register(new EditorStringEnumOption(
 		EditorOption.unusualLineTerminators, 'unusualLineTerminators',
-		'prompt' as 'off' | 'prompt' | 'auto',
-		['off', 'prompt', 'auto'] as const,
+		'prompt' as 'auto' | 'off' | 'prompt',
+		['auto', 'off', 'prompt'] as const,
 		{
 			enumDescriptions: [
 				nls.localize('unusualLineTerminators.off', "Unusual line terminators are ignored."),
